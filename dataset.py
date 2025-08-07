@@ -1,352 +1,263 @@
 """
-TEMPLATE: Dataset class for PDE simulation datasets.
+Shallow Water Dataset - Generate perturbation samples and vorticity evolution
+Uses PyTorch IterableDataset for on-demand sample generation.
 
-INSTRUCTIONS FOR CLAUDE:
-1. Replace this docstring with equation-specific description
-2. Add equation in mathematical notation (LaTeX format preferred)
-3. Describe the physical system being simulated
-4. Import the necessary libraries for your PDE solver below
+This dataset simulates the viscous shallow water equations on a sphere using Dedalus.
+It generates random perturbations to a balanced jet and evolves the system to produce
+vorticity fields over time.
 
-Example docstrings:
-- "2D Heat equation with Dirichlet boundary conditions"
-- "1D Wave equation with periodic boundaries"
-- "2D Navier-Stokes equations in a lid-driven cavity"
+Equations solved:
+- Momentum: ∂u/∂t + ν∇⁴u + g∇h + 2Ω × u = -u·∇u
+- Continuity: ∂h/∂t + ν∇⁴h + H∇·u = -∇·(hu)
+
+where u is velocity, h is height perturbation, ν is viscosity, g is gravity,
+Ω is rotation vector, and H is mean height.
 """
 
 import numpy as np
 from torch.utils.data import IterableDataset
-
-# TODO: Import your PDE solver library here
-# Examples:
-# import dedalus.public as d3  # For spectral methods
-# import jax.numpy as jnp; from jax import jit  # For JAX-based solvers
-# import torch  # For neural PDE solvers
-# from scipy.integrate import solve_ivp  # For scipy ODE solvers
-
+import dedalus.public as d3
 import logging
-
-# TODO: Import additional utilities as needed
-# Examples:
-# from functools import partial
-# from sklearn.metrics.pairwise import rbf_kernel  # For GP initial conditions
-# import scipy.sparse as sp  # For sparse matrices
 
 logger = logging.getLogger(__name__)
 
 
-def sample_gp_prior(kernel, X, n_samples=1):
-    """
-    Sample from Gaussian Process prior - KEEP if using GP-based initial conditions.
-    
-    INSTRUCTIONS FOR CLAUDE:
-    - This function samples from GP prior (zero mean) for random smooth fields
-    - REMOVE this function if your dataset doesn't use GP sampling  
-    - KEEP for generating smooth random initial conditions
-    - Requires a kernel function (e.g., from sklearn.metrics.pairwise.rbf_kernel)
-    """
-    if X.ndim == 1:
-        X = X.reshape(-1, 1)
-
-    K = kernel(X, X)
-
-    prior = np.random.multivariate_normal(
-        mean=np.zeros(X.shape[0]),
-        cov=K,
-        size=n_samples,
-    )
-
-    return prior
+def build_s2_coord_vertices(phi, theta):
+    """Build vertices for spherical coordinate plotting."""
+    phi = phi.ravel()
+    phi_vert = np.concatenate([phi, [2 * np.pi]])
+    phi_vert -= phi_vert[1] / 2
+    theta = theta.ravel()
+    theta_mid = (theta[:-1] + theta[1:]) / 2
+    theta_vert = np.concatenate([[np.pi], theta_mid, [0]])
+    return np.meshgrid(phi_vert, theta_vert, indexing="ij")
 
 
-def sample_gp_posterior(kernel, X, y, xt, n_samples=1):
-    """
-    Sample from Gaussian Process posterior - KEEP if using GP-based initial conditions.
-
-    INSTRUCTIONS FOR CLAUDE:
-    - This function is commonly used across datasets for smooth random initial conditions
-    - REMOVE this function if your dataset doesn't use GP sampling
-    - KEEP if you want smooth, correlated random fields as initial conditions
-    - Requires sklearn.metrics.pairwise.rbf_kernel import (or similar kernel function)
-    """
-    if X.ndim == 1:
-        X = X.reshape(-1, 1)
-
-    if y.ndim == 1:
-        y = y.reshape(-1, 1)
-
-    if xt.ndim == 1:
-        xt = xt.reshape(-1, 1)
-
-    K = kernel(X, X)
-    Kt = kernel(X, xt)
-    Ktt = kernel(xt, xt)
-
-    K_inv = np.linalg.inv(K)
-
-    mu = Kt.T @ K_inv @ y
-    cov = Ktt - Kt.T @ K_inv @ Kt
-
-    mu = mu.squeeze()
-
-    posterior = np.random.multivariate_normal(
-        mean=mu,
-        cov=cov,
-        size=n_samples,
-    )
-
-    return posterior
-
-
-# TODO: Add additional utility functions as needed for your specific PDE
-# Common examples:
-# - Vortex generation functions for fluid dynamics
-# - Wave packet generators for wave equations
-# - Heat source/sink generators for thermal problems
-
-
-class YourDataset(IterableDataset):
-    """
-    INSTRUCTIONS FOR CLAUDE:
-    1. Rename this class to match your PDE (e.g., HeatEquationDataset, WaveDataset, NavierStokesDataset)
-    2. Update this docstring with your equation description and mathematical form
-    3. Keep the same __init__ signature pattern but replace parameters with your PDE-specific ones
-    """
+class ShallowWaterDataset(IterableDataset):
     def __init__(
         self,
-        # TODO: Replace these parameters with your PDE-specific parameters
-        # Keep similar structure: domain_size, grid_points, equation_parameters, solver_parameters
-        # 
-        # Example parameter patterns:
-        # Domain parameters:
-        Lx=10,                    # Domain length/width (or Lx, Ly for 2D)  
-        Nx=1024,                  # Grid points (or Nx, Ny for 2D)
-        # 
-        # PDE-specific parameters (replace a, b with your equation coefficients):
-        # diffusion_coeff=1e-4,   # Diffusion/viscosity coefficient
-        # wave_speed=1.0,         # Wave speed for hyperbolic equations
-        # source_strength=0.1,    # Source term strength
-        # boundary_conditions="periodic",  # Boundary condition type
-        # 
-        # Solver parameters:
-        # dealias=3/2,            # Dealiasing factor (for spectral methods)
-        stop_sim_time=10,         # Final simulation time
-        timestep=2e-3,           # Time step size  
-        # timestepper=...,        # Time integration scheme (solver-specific)
+        Nphi=256,
+        Ntheta=128,
+        dealias=3 / 2,
+        stop_sim_time=360,  # hours
+        timestep=600,  # seconds
+        timestepper=d3.RK222,
         dtype=np.float64,
+        alpha_range=(0.05, 0.6),
+        beta_range=(0.02, 0.3),
+        save_interval=5,  # Save every 5 hours instead of every hour
     ):
         """
-        TODO: Replace this docstring with your PDE description
-        
-        Template:
-        Dataset for [EQUATION_NAME] simulations with [BOUNDARY_CONDITIONS].
-        Solves: [MATHEMATICAL_EQUATION_HERE]
-        
+        Dataset for shallow water equation simulations on a sphere.
+
         Args:
-            Lx: Domain length in x-direction
-            Nx: Number of grid points in x-direction
-            [your_parameter]: Description of your PDE parameter
-            stop_sim_time: Final simulation time
-            timestep: Time step size
-            dtype: Data type for computations
+            Nphi: Number of longitudinal grid points
+            Ntheta: Number of latitudinal grid points
+            dealias: Dealiasing factor
+            stop_sim_time: Simulation time in hours
+            timestep: Time step size in seconds
+            timestepper: Dedalus timestepper
+            dtype: Data type
+            alpha_range: Range for alpha perturbation parameter
+            beta_range: Range for beta perturbation parameter
+            save_interval: Save output every N hours
         """
         super().__init__()
-        
-        # TODO: Store your domain and grid parameters
-        self.Lx = Lx
-        self.Nx = Nx
-        
-        # TODO: Store your PDE-specific parameters
-        # self.diffusion_coeff = diffusion_coeff
-        # self.wave_speed = wave_speed
-        # etc.
-        
-        # Store solver parameters
+        self.Nphi = Nphi
+        self.Ntheta = Ntheta
+        self.dealias = dealias
         self.stop_sim_time = stop_sim_time
         self.timestep = timestep
+        self.timestepper = timestepper
         self.dtype = dtype
-        
-        # TODO: Setup your solver components
-        # Replace this section with your solver initialization
-        # 
-        # DEDALUS EXAMPLE (spectral methods):
-        # self.xcoord = d3.Coordinate("x")
-        # self.dist = d3.Distributor(self.xcoord, dtype=dtype)
-        # self.xbasis = d3.RealFourier(self.xcoord, size=Nx, bounds=(0, Lx))
-        # self.x = self.dist.local_grid(self.xbasis)
-        #
-        # FINITE DIFFERENCE EXAMPLE:
-        # self.x = np.linspace(0, Lx, Nx)
-        # self.dx = Lx / (Nx - 1)
-        #
-        # JAX EXAMPLE:
-        # self.x = jnp.linspace(0, Lx, Nx)
-        
-        # TODO: Setup your PDE problem/operators
-        # Replace with your equation setup
-        #
-        # DEDALUS EXAMPLE:
-        # self.u = self.dist.Field(name="u", bases=self.xbasis)
-        # dx = lambda A: d3.Differentiate(A, self.xcoord)
-        # self.problem = d3.IVP([self.u], namespace=locals())
-        # self.problem.add_equation("dt(u) = diffusion_coeff*dx(dx(u))")  # Heat equation
-        #
-        # FINITE DIFFERENCE EXAMPLE:
-        # self.laplacian_matrix = self._build_laplacian_matrix()
-        #
-        # CUSTOM/JAX EXAMPLE:
-        # self.solve_step = jit(self._time_step)  # JIT compile your solver step
-        
-        # Placeholder - replace with your actual solver setup
-        self.x = np.linspace(0, Lx, Nx)  # Simple grid for template
+        self.alpha_range = alpha_range
+        self.beta_range = beta_range
+        self.save_interval = save_interval
+
+        # Simulation units
+        self.meter = 1 / 6.37122e6
+        self.hour = 1
+        self.second = self.hour / 3600
+
+        # Physical parameters
+        self.R = 6.37122e6 * self.meter
+        self.Omega = 7.292e-5 / self.second
+        self.nu = 1e5 * self.meter**2 / self.second / 32**2
+        self.g = 9.80616 * self.meter / self.second**2
+        self.H = 1e4 * self.meter
+        self.timestep_scaled = timestep * self.second
+        self.stop_sim_time_scaled = stop_sim_time * self.hour
+
+        # Setup Dedalus components
+        self.coords = d3.S2Coordinates("phi", "theta")
+        self.dist = d3.Distributor(self.coords, dtype=dtype)
+        self.basis = d3.SphereBasis(
+            self.coords, (Nphi, Ntheta), radius=self.R, dealias=dealias, dtype=dtype
+        )
+
+        # Get grids for initial conditions
+        self.phi, self.theta = self.dist.local_grids(self.basis)
+        self.lat = np.pi / 2 - self.theta + 0 * self.phi
+
+        # Setup jet parameters
+        self.umax = 80 * self.meter / self.second
+        self.lat0 = np.pi / 7
+        self.lat1 = np.pi / 2 - self.lat0
+        self.en = np.exp(-4 / (self.lat1 - self.lat0) ** 2)
+        self.jet = (self.lat0 <= self.lat) * (self.lat <= self.lat1)
+        self.u_jet = (
+            self.umax
+            / self.en
+            * np.exp(
+                1 / (self.lat[self.jet] - self.lat0) / (self.lat[self.jet] - self.lat1)
+            )
+        )
+
+        # Perturbation parameters
+        self.lat2 = np.pi / 4
+        self.hpert = 120 * self.meter
+
+        # Substitutions for equations
+        self.zcross = lambda A: d3.MulCosine(d3.skew(A))
 
     def __iter__(self):
-        """
-        Generate infinite samples from the dataset.
-        
-        INSTRUCTIONS FOR CLAUDE:
-        - KEEP this method signature and infinite loop structure
-        - Replace the initial condition generation with your method
-        - Always end with: yield self.solve(initial_condition)
-        """
+        """Generate infinite samples from the dataset."""
         while True:
-            # TODO: Generate random initial condition
-            # Replace this section with your initial condition generation
-            #
-            # EXAMPLE PATTERNS:
-            #
-            # 1. GP-based smooth random fields:
-            # sigma = 0.2 * self.Lx
-            # gamma = 1 / (2 * sigma**2)  
-            # u_init = sample_gp_posterior(
-            #     kernel=partial(rbf_kernel, gamma=gamma),
-            #     X=np.array([0, self.Lx]), 
-            #     y=np.array([0, 0]),
-            #     xt=self.x.ravel(),
-            #     n_samples=1,
-            # )[0]
-            #
-            # 2. Random Fourier modes:
-            # n_modes = 5
-            # amplitudes = np.random.normal(0, 1, n_modes)
-            # phases = np.random.uniform(0, 2*np.pi, n_modes)
-            # u_init = sum(amp * np.sin(k * 2*np.pi*self.x/self.Lx + phase) 
-            #              for k, amp, phase in zip(range(1, n_modes+1), amplitudes, phases))
-            #
-            # 3. Physics-based initial conditions:
-            # center = np.random.uniform(0.2*self.Lx, 0.8*self.Lx)
-            # width = np.random.uniform(0.05*self.Lx, 0.2*self.Lx)
-            # amplitude = np.random.uniform(0.5, 2.0)
-            # u_init = amplitude * np.exp(-(self.x - center)**2 / width**2)
-            #
-            # 4. Random parameters with fixed shape:
-            # u_init = np.random.normal(0, 0.1, self.Nx)  # Random noise
-            
-            # PLACEHOLDER - Replace with your initial condition generation
-            u_init = np.random.normal(0, 0.1, self.Nx)  # Simple random noise
-            
-            # Solve the PDE and yield result (KEEP this line)
-            yield self.solve(u_init)
+            # Sample-varying parameters
+            alpha = np.random.uniform(*self.alpha_range)
+            beta = np.random.uniform(*self.beta_range)
 
-    def solve(self, initial_condition):
-        """
-        Solve the PDE for a given initial condition.
-        
-        INSTRUCTIONS FOR CLAUDE:
-        - KEEP this method signature exactly: solve(self, initial_condition)
-        - CUSTOMIZE the return dictionary to include all data useful for learning your PDE
-        - Common fields to include:
-          * Coordinates: spatial_coordinates, time_coordinates
-          * Solutions: u_trajectory, v_trajectory (for multiple fields)
-          * Initial/boundary conditions: u_initial, boundary_values
-          * Parameters: equation_parameters, solver_parameters
-          * Derivatives: u_x, u_xx, u_t (if useful for learning)
-          * Physical quantities: energy, momentum, vorticity, etc.
-        - Replace solver implementation with your PDE solver
+            # Create fields
+            u = self.dist.VectorField(self.coords, name="u", bases=self.basis)
+            h = self.dist.Field(name="h", bases=self.basis)
 
-        Args:
-            initial_condition: Initial condition as a numpy array.
+            # Set up zonal jet
+            u["g"][0][self.jet] = self.u_jet
 
-        Returns:
-            A dictionary containing all data useful for learning the PDE.
-        """
-        
-        # TODO: Implement your PDE solver
-        # Replace this entire section with your time-stepping code
-        #
-        # DEDALUS EXAMPLE:
-        # self.u["g"] = initial_condition  # Set initial condition
-        # solver = self.problem.build_solver(self.timestepper)
-        # solver.stop_sim_time = self.stop_sim_time
-        # u_list = [self.u["g", 1].copy()]
-        # t_list = [solver.sim_time]
-        # while solver.proceed:
-        #     solver.step(self.timestep)
-        #     if solver.iteration % 25 == 0:  # Save every 25 steps
-        #         u_list.append(self.u["g", 1].copy())
-        #         t_list.append(solver.sim_time)
-        #
-        # FINITE DIFFERENCE EXAMPLE:
-        # u = initial_condition.copy()
-        # u_list = [u.copy()]
-        # t_list = [0.0]
-        # t = 0.0
-        # while t < self.stop_sim_time:
-        #     u = self._time_step(u, self.timestep)  # Your time step function
-        #     t += self.timestep
-        #     if len(t_list) % 25 == 0:  # Save every 25 steps
-        #         u_list.append(u.copy())
-        #         t_list.append(t)
-        
-        # PLACEHOLDER SOLVER - Replace with your actual implementation
-        n_steps = int(self.stop_sim_time / self.timestep)
-        u_list = []
-        t_list = []
-        u = initial_condition.copy()
-        
-        for i in range(n_steps):
-            if i % 25 == 0:  # Save every 25 steps
-                u_list.append(u.copy())
-                t_list.append(i * self.timestep)
-            # Placeholder: just add small random perturbations (REPLACE THIS!)
-            u += np.random.normal(0, 0.001, u.shape) * self.timestep
-        
-        u_trajectory = np.array(u_list)
-        time_coordinates = np.array(t_list)
+            # Solve for balanced height field
+            c = self.dist.Field(name="c")
+            g = self.g
+            Omega = self.Omega
+            zcross = self.zcross
+            problem = d3.LBVP([h, c], namespace=locals())
+            problem.add_equation("g*lap(h) + c = - div(u@grad(u) + 2*Omega*zcross(u))")
+            problem.add_equation("ave(h) = 0")
+            solver = problem.build_solver()
+            solver.solve()
 
-        # TODO: Customize this return dictionary for your PDE
-        # Include ALL data that would be useful for learning your PDE
-        #
-        # EXAMPLES of useful data to include:
-        return {
-            # Coordinates (almost always needed)
-            "spatial_coordinates": self.x.ravel(),  # Spatial grid
-            "time_coordinates": time_coordinates,   # Time points
-            
-            # Solution fields (customize field names for your PDE)
-            "u_initial": initial_condition,         # Initial condition
-            "u_trajectory": u_trajectory,           # Primary solution field
-            # "v_trajectory": v_trajectory,         # Secondary field (e.g., velocity in Navier-Stokes)
-            # "p_trajectory": p_trajectory,         # Pressure field
-            
-            # PDE parameters (useful for learning parameter dependencies)
-            # "diffusion_coeff": self.diffusion_coeff,
-            # "wave_speed": self.wave_speed,
-            # "reynolds_number": self.reynolds_number,
-            
-            # Derivatives (if useful for learning the PDE structure)
-            # "u_x": u_x_trajectory,                # Spatial derivatives
-            # "u_xx": u_xx_trajectory, 
-            # "u_t": u_t_trajectory,                # Time derivative
-            
-            # Physical quantities (if relevant)
-            # "energy": energy_trajectory,          # Total energy over time
-            # "momentum": momentum_trajectory,      # Momentum conservation
-            # "vorticity": vorticity_trajectory,    # For fluid dynamics
-            
-            # Boundary conditions (if non-trivial)
-            # "boundary_left": left_bc_trajectory,
-            # "boundary_right": right_bc_trajectory,
-            
-            # Source terms (if present)
-            # "source_term": source_trajectory,
-        }
+            # Add perturbation
+            h["g"] += (
+                self.hpert
+                * np.cos(self.lat)
+                * np.exp(-((self.phi / alpha) ** 2))
+                * np.exp(-(((self.lat2 - self.lat) / beta) ** 2))
+            )
+
+            # Store initial perturbation for output
+            h_initial = np.copy(h["g"])
+
+            # Solve the shallow water equations
+            nu = self.nu
+            g = self.g
+            Omega = self.Omega
+            H = self.H
+            zcross = self.zcross
+            problem = d3.IVP([u, h], namespace=locals())
+            problem.add_equation(
+                "dt(u) + nu*lap(lap(u)) + g*grad(h) + 2*Omega*zcross(u) = - u@grad(u)"
+            )
+            problem.add_equation("dt(h) + nu*lap(lap(h)) + H*div(u) = - div(h*u)")
+
+            # Build solver
+            solver = problem.build_solver(self.timestepper)
+            solver.stop_sim_time = self.stop_sim_time_scaled
+
+            # Storage for solution
+            vorticity_list = []
+            u_list = []
+            h_list = []
+            time_list = []
+
+            # Initial state - compute vorticity and store fields
+            vorticity_data = -d3.div(d3.skew(u)).evaluate()["g"]
+            u.change_scales(1)
+            h.change_scales(1)
+
+            vorticity_list.append(np.copy(vorticity_data))
+            u_list.append(np.copy(u["g"]))
+            h_list.append(np.copy(h["g"]))
+            time_list.append(solver.sim_time / self.hour)  # Convert to hours
+
+            # Main loop
+            save_counter = 0
+            while solver.proceed:
+                solver.step(self.timestep_scaled)
+                save_counter += 1
+
+                # Save every save_interval hours (convert timestep from seconds to hours)
+                if (
+                    save_counter
+                    % (self.save_interval * self.hour / self.timestep_scaled)
+                    == 0
+                ):
+                    vorticity_data = -d3.div(d3.skew(u)).evaluate()["g"]
+                    u.change_scales(1)
+                    h.change_scales(1)
+
+                    vorticity_list.append(np.copy(vorticity_data))
+                    u_list.append(np.copy(u["g"]))
+                    h_list.append(np.copy(h["g"]))
+                    time_list.append(solver.sim_time / self.hour)
+
+            # Create spatial coordinates
+            Nphi, Ntheta = self.Nphi, self.Ntheta
+            phi_1d = np.linspace(0, 2 * np.pi, Nphi, endpoint=False)
+            theta_1d = np.linspace(0, np.pi, Ntheta)
+
+            phi_vert, theta_vert = build_s2_coord_vertices(phi_1d, theta_1d)
+            spatial_coords = np.column_stack([phi_vert.ravel(), theta_vert.ravel()])
+
+            # Convert lists to arrays
+            u_trajectory = np.array(u_list)  # Shape: (time, 2, Nphi, Ntheta)
+            h_trajectory = np.array(h_list)  # Shape: (time, Nphi, Ntheta)
+            vorticity_trajectory = np.array(
+                vorticity_list
+            )  # Shape: (time, Nphi, Ntheta)
+            time_coords = np.array(time_list)
+
+            # Format and yield comprehensive output
+            yield {
+                # Spatial coordinates
+                "spatial_coordinates": spatial_coords,  # (Nphi*Ntheta, 2) - phi, theta pairs
+                "phi_coords": self.phi,  # Raw phi grid
+                "theta_coords": self.theta,  # Raw theta grid
+                "lat_coords": self.lat,  # Latitude grid
+                # Time coordinates
+                "time_coordinates": time_coords,  # Time points where solution was saved
+                # Initial conditions
+                "u_initial": u_list[0],  # Initial velocity field (2, Nphi, Ntheta)
+                "h_initial": h_initial,  # Initial height perturbation (Nphi, Ntheta)
+                "vorticity_initial": vorticity_list[
+                    0
+                ],  # Initial vorticity (Nphi, Ntheta)
+                # Solution trajectories
+                "u_trajectory": u_trajectory,  # Velocity evolution (time, 2, Nphi, Ntheta)
+                "h_trajectory": h_trajectory,  # Height evolution (time, Nphi, Ntheta)
+                "vorticity_trajectory": vorticity_trajectory,  # Vorticity evolution (time, Nphi, Ntheta)
+                # Physical parameters
+                "alpha": alpha,  # Perturbation width parameter
+                "beta": beta,  # Perturbation latitude parameter
+                "R": self.R,  # Earth radius
+                "Omega": self.Omega,  # Earth rotation rate
+                "nu": self.nu,  # Viscosity
+                "g": self.g,  # Gravity
+                "H": self.H,  # Mean height
+                # Grid parameters
+                "Nphi": Nphi,
+                "Ntheta": Ntheta,
+                # Legacy fields for compatibility
+                "x": spatial_coords,  # Same as spatial_coordinates
+                "u": h_initial.ravel(),  # Flattened initial height perturbation
+                "y": spatial_coords,  # Same as spatial_coordinates
+                "s": vorticity_trajectory,  # Same as vorticity_trajectory
+            }

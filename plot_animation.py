@@ -1,127 +1,138 @@
 #!/usr/bin/env python3
 """
-Generate an animation GIF of a single PDE sample time evolution.
-
-INSTRUCTIONS FOR CLAUDE:
-1. Update the docstring to describe your specific dataset
-2. Update the import statement to match your dataset class name  
-3. Update the function name and customize animation for your PDE
-4. Modify the animation code to visualize your specific solution fields
+Generate an animation GIF of a single shallow water sample time evolution.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-# TODO: Update this import to match your dataset class name
-from dataset import YourDataset  # Replace YourDataset with your actual class name
+import os
+from PIL import Image
+from dataset import ShallowWaterDataset, build_s2_coord_vertices
 
 
-def create_pde_animation(sample, save_path="sample_animation.gif", fps=10):
-    """
-    Create an animation GIF from a PDE sample.
-    
-    INSTRUCTIONS FOR CLAUDE:
-    - Customize this function for your PDE animation needs
-    - Modify plot setup, data extraction, and animation based on your dataset
-    - Common patterns: 1D line plots, 2D heatmaps, vector field animations
-    """
-    # TODO: Extract data from your dataset's return dictionary
-    spatial_coordinates = sample["spatial_coordinates"]
-    u_initial = sample["u_initial"]
-    u_trajectory = sample["u_trajectory"]
-    time_coordinates = sample["time_coordinates"]
-    
-    # Additional fields you might want to animate:
-    # v_trajectory = sample.get("v_trajectory")  # Secondary field
-    # vorticity = sample.get("vorticity")        # Vorticity evolution
+def create_shallow_water_animation(sample, save_path="shallow_water_animation.gif", fps=2):
+    """Create an animated GIF showing vorticity evolution over time"""
+    # Extract data
+    vorticity_traj = sample["vorticity_trajectory"]
+    alpha = sample["alpha"]
+    beta = sample["beta"]
+    time_traj = sample["time_coordinates"]
 
-    # TODO: Set up the figure and axis for your PDE
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.set_xlim(0, spatial_coordinates[-1])
+    # Get shape directly from vorticity trajectory
+    vorticity_shape = vorticity_traj.shape[1:]
+    Nphi, Ntheta = vorticity_shape
 
-    # Determine y-axis limits based on data range
-    u_min = np.min(u_trajectory)
-    u_max = np.max(u_trajectory)
-    u_range = u_max - u_min
-    ax.set_ylim(u_min - 0.1 * u_range, u_max + 0.1 * u_range)
+    # Use 1D phi/theta for plotting, as in plot_sphere.py
+    phi_1d = np.linspace(0, 2 * np.pi, Nphi, endpoint=False)
+    theta_1d = np.linspace(0, np.pi, Ntheta)
 
-    ax.set_xlabel("x")
-    ax.set_ylabel("u(x,t)")  # Update label for your field
-    ax.set_title("PDE Evolution Animation")  # Update title
-    ax.grid(True, alpha=0.3)
+    phi_vert, theta_vert = build_s2_coord_vertices(phi_1d, theta_1d)
+    x = np.sin(theta_vert) * np.cos(phi_vert)
+    y = np.sin(theta_vert) * np.sin(phi_vert)
+    z = -np.cos(theta_vert)  # Flip poles
 
-    # TODO: Initialize plot elements for animation
-    # For 1D line plots:
-    (line,) = ax.plot([], [], "b-", linewidth=2)
-    # For multiple fields:
-    # (u_line,) = ax.plot([], [], "b-", linewidth=2, label='u')
-    # (v_line,) = ax.plot([], [], "r-", linewidth=2, label='v')
-    # ax.legend()
-    # For 2D heatmaps:
-    # im = ax.imshow(u_trajectory[0], extent=[x_min, x_max, y_min, y_max], animated=True)
-    
-    time_text = ax.text(
-        0.02,
-        0.95,
-        "",
-        transform=ax.transAxes,
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-    )
+    # Get global vorticity range for consistent color scaling
+    vmax_global = np.max(np.abs(vorticity_traj))
 
-    def animate(frame):
-        """
-        Animation function - customize for your PDE visualization
+    # Create temporary directory for frames
+    temp_dir = "temp_gif_frames"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Generate frames
+    frame_paths = []
+
+    from mpl_toolkits.mplot3d import Axes3D
+
+    for i, t in enumerate(time_traj):
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+        vort_data = vorticity_traj[i]
+        import matplotlib
+
+        norm = matplotlib.colors.Normalize(-vmax_global, vmax_global)
+        fc = plt.cm.RdBu_r(norm(vort_data))
+        ax.plot_surface(
+            x,
+            y,
+            z,
+            facecolors=fc,
+            cstride=1,
+            rstride=1,
+            linewidth=0,
+            antialiased=False,
+            shade=False,
+        )
+        ax.set_title(
+            f"Vorticity at t={t:.1f}h (α={alpha:.3f}, β={beta:.3f})",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.set_axis_off()
+        ax.set_box_aspect([1, 1, 1])
+        mappable = plt.cm.ScalarMappable(cmap="RdBu_r", norm=norm)
+        mappable.set_array(vort_data)
+
+        # Position colorbar on the right side
+        plt.subplots_adjust(right=0.85)
+        cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])
+        fig.colorbar(mappable, cax=cbar_ax, label="Vorticity (1/s)")
         
-        INSTRUCTIONS FOR CLAUDE:
-        - Update this function to animate your specific fields
-        - Return all animated objects for proper blitting
-        """
-        # TODO: Update animation for your fields
-        # For 1D line plots:
-        line.set_data(spatial_coordinates, u_trajectory[frame])
-        # For multiple fields:
-        # u_line.set_data(spatial_coordinates, u_trajectory[frame])
-        # v_line.set_data(spatial_coordinates, v_trajectory[frame])
-        # For 2D heatmaps:
-        # im.set_array(u_trajectory[frame])
-        
-        time_text.set_text(f"Time: {time_coordinates[frame]:.3f}")
-        
-        # TODO: Return all animated objects
-        return line, time_text
-        # For multiple objects: return u_line, v_line, time_text
-        # For heatmaps: return im, time_text
+        # Save frame
+        frame_path = os.path.join(temp_dir, f"frame_{i:03d}.png")
+        plt.savefig(frame_path, dpi=100, bbox_inches="tight", facecolor="white")
+        frame_paths.append(frame_path)
+        plt.close()
 
-    # Create animation
-    anim = animation.FuncAnimation(
-        fig,
-        animate,
-        frames=len(time_coordinates),
-        interval=1000 / fps,
-        blit=True,
-        repeat=True,
-    )
+    # Create GIF from frames
+    images = []
+    for frame_path in frame_paths:
+        img = Image.open(frame_path)
+        images.append(img)
+
+    # Calculate duration per frame (in milliseconds)
+    frame_duration = int(1000 / fps)
 
     # Save as GIF
-    anim.save(save_path, writer="pillow", fps=fps)
-    plt.close()
+    images[0].save(
+        save_path,
+        save_all=True,
+        append_images=images[1:],
+        duration=frame_duration,
+        loop=0,  # Loop forever
+    )
 
-    print(f"Animation saved to {save_path}")
+    # Clean up temporary files
+    for frame_path in frame_paths:
+        os.remove(frame_path)
+    os.rmdir(temp_dir)
+
+    print(f"Animated GIF saved to {save_path}")
+    print(f"Animation duration: {len(time_traj) * frame_duration / 1000:.1f} seconds")
+    print(f"Frames per second: {fps}")
+
+    return save_path
 
 
 if __name__ == "__main__":
     # Set random seed for reproducibility
-    np.random.seed(42)
+    np.random.seed(1)
 
-    # TODO: Create your dataset instance
-    dataset = YourDataset()  # Update with your dataset class name
+    # Create dataset with default parameters
+    dataset = ShallowWaterDataset(
+        Nphi=64,  # Smaller for faster animation generation
+        Ntheta=32,
+        stop_sim_time=100,  # Shorter simulation
+        save_interval=5,
+    )
 
     # Generate a single sample
+    print("Generating shallow water sample...")
     sample = next(iter(dataset))
 
     print("Creating animation...")
     print(f"Time steps: {len(sample['time_coordinates'])}")
-    print(f"Spatial points: {len(sample['spatial_coordinates'])}")
+    print(f"Vorticity grid size: {sample['Nphi']}×{sample['Ntheta']}")
 
     # Create animation
-    create_pde_animation(sample)  # Updated function name
+    create_shallow_water_animation(sample)

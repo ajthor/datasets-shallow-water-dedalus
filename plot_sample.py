@@ -1,106 +1,115 @@
 #!/usr/bin/env python3
 """
-Plot a single sample from the PDE dataset.
-
-INSTRUCTIONS FOR CLAUDE:
-1. Update the docstring to describe your specific dataset
-2. Update the import statement to match your dataset class name
-3. Update the function name and customize plotting for your PDE
-4. Modify the plotting code to visualize your specific solution fields
+Plot a single sample from the shallow water dataset.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-# TODO: Update this import to match your dataset class name
-from dataset import YourDataset  # Replace YourDataset with your actual class name
+from dataset import ShallowWaterDataset, build_s2_coord_vertices
 
 
-def plot_pde_sample(sample, save_path="sample_plot.png"):
-    """
-    Plot a single sample from the PDE dataset.
-    
-    INSTRUCTIONS FOR CLAUDE:
-    - Customize this function for your PDE visualization needs
-    - Modify plot layout, titles, and data fields based on your dataset's return dictionary
-    - Common patterns: 1D time series, 2D heatmaps, multiple fields, vector fields
-    """
-    # TODO: Customize plot layout for your PDE
-    # Common layouts: 
-    # - 1D problems: (ax1=initial, ax2=spacetime), or (ax1=initial, ax2=final, ax3=spacetime)
-    # - 2D problems: (ax1=initial, ax2=final), or multiple time snapshots
-    # - Multi-field: separate subplots for each field (u, v, p, etc.)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+def plot_shallow_water_sample(sample, save_path="sample_plot.png"):
+    """Plot a 4-panel view of vorticity evolution"""
+    # Extract data from comprehensive dataset output
+    vorticity_traj = sample["vorticity_trajectory"]
+    alpha = sample["alpha"]
+    beta = sample["beta"]
+    time_traj = sample["time_coordinates"]
 
-    # TODO: Extract data from your dataset's return dictionary
-    # Replace these with your actual field names
-    spatial_coordinates = sample["spatial_coordinates"]
-    u_initial = sample["u_initial"]
-    u_trajectory = sample["u_trajectory"]
-    time_coordinates = sample["time_coordinates"]
-    
-    # Additional fields you might want to plot:
-    # v_trajectory = sample.get("v_trajectory")  # Secondary field
-    # energy = sample.get("energy")             # Energy over time
-    # vorticity = sample.get("vorticity")       # Vorticity field
+    # Get shape directly from vorticity trajectory
+    vorticity_shape = vorticity_traj.shape[1:]
+    Nphi, Ntheta = vorticity_shape
 
-    # TODO: Customize Plot 1 - Initial condition or field comparison
-    ax1.plot(spatial_coordinates, u_initial, "b-", linewidth=2)
-    ax1.set_xlabel("x")
-    ax1.set_ylabel("u(x, t=0)")
-    ax1.set_title("Initial Condition")  # Update title for your PDE
-    ax1.grid(True, alpha=0.3)
-    ax1.set_xlim(0, spatial_coordinates[-1])
-    
-    # Examples for other plot types:
-    # 2D initial condition: ax1.imshow(u_initial, extent=[x_min, x_max, y_min, y_max])
-    # Multiple fields: ax1.plot(x, u_initial, 'b-', label='u'); ax1.plot(x, v_initial, 'r-', label='v')
+    # Use 1D phi/theta for plotting, as in plot_sphere.py
+    phi_1d = np.linspace(0, 2 * np.pi, Nphi, endpoint=False)
+    theta_1d = np.linspace(0, np.pi, Ntheta)
 
-    # TODO: Customize Plot 2 - Space-time evolution or final state
-    im = ax2.pcolormesh(
-        spatial_coordinates,
-        time_coordinates,
-        u_trajectory,
-        cmap="RdBu_r",  # Choose colormap appropriate for your PDE
-        shading="gouraud",
-        rasterized=True,
+    phi_vert, theta_vert = build_s2_coord_vertices(phi_1d, theta_1d)
+    x = np.sin(theta_vert) * np.cos(phi_vert)
+    y = np.sin(theta_vert) * np.sin(phi_vert)
+    z = -np.cos(theta_vert)  # Flip poles
+
+    # Select 4 time points: initial, two middle, and final
+    n_times = len(time_traj)
+    time_indices = [0, n_times // 3, 2 * n_times // 3, n_times - 1]
+    time_labels = ["Initial", "Early", "Late", "Final"]
+
+    # Get global vorticity range for consistent color scaling
+    vmax_global = np.max(np.abs(vorticity_traj))
+
+    from mpl_toolkits.mplot3d import Axes3D
+
+    fig = plt.figure(figsize=(20, 5))
+    axes = [fig.add_subplot(1, 4, i + 1, projection="3d") for i in range(4)]
+
+    for i, (time_idx, label) in enumerate(zip(time_indices, time_labels)):
+        ax = axes[i]
+        vort_data = vorticity_traj[time_idx]
+        # Use normalization as in plot_sphere.py
+        import matplotlib
+
+        norm = matplotlib.colors.Normalize(-vmax_global, vmax_global)
+        fc = plt.cm.RdBu_r(norm(vort_data))
+        ax.plot_surface(
+            x,
+            y,
+            z,
+            facecolors=fc,
+            cstride=1,
+            rstride=1,
+            linewidth=0,
+            antialiased=False,
+            shade=False,
+        )
+        ax.set_title(f"{label} Vorticity (t={time_traj[time_idx]:.1f}h)", fontsize=12)
+        ax.set_axis_off()
+        ax.set_box_aspect([1, 1, 1])
+
+    mappable = plt.cm.ScalarMappable(cmap="RdBu_r", norm=norm)
+    mappable.set_array(vort_data)
+
+    # Position colorbar on the right side
+    plt.subplots_adjust(right=0.88)
+    cbar_ax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
+    fig.colorbar(mappable, cax=cbar_ax, label="Vorticity (1/s)")
+
+    fig.suptitle(
+        f"Shallow Water Vorticity Evolution\\nα={alpha:.3f}, β={beta:.3f}",
+        fontsize=16,
+        fontweight="bold",
     )
-    ax2.set_xlim(0, spatial_coordinates[-1])
-    ax2.set_ylim(0, time_coordinates[-1])
-    ax2.set_xlabel("x")
-    ax2.set_ylabel("t")
-    ax2.set_title("PDE Evolution")  # Update title for your PDE
-    
-    # Examples for other plot types:
-    # Final state: ax2.plot(x, u_final, 'r-', label='Final')
-    # Energy plot: ax2.plot(time_coordinates, energy, 'g-'); ax2.set_ylabel('Energy')
-    # Vector field: ax2.quiver(X, Y, U, V)
-
-    # Add colorbar
-    plt.colorbar(im, ax=ax2, label="u(x,t)")  # Update label for your field
-
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.tight_layout(rect=[0, 0, 0.88, 1])
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
 
     print(f"Sample visualization saved to {save_path}")
+    print(f"Parameters: α={alpha:.3f}, β={beta:.3f}")
+    print(f"Time steps saved: {len(time_traj)}")
+    print(f"Vorticity grid size: {Nphi}×{Ntheta}")
 
 
 if __name__ == "__main__":
     # Set random seed for reproducibility
-    np.random.seed(42)
+    np.random.seed(1)
 
-    # TODO: Create your dataset instance
-    dataset = YourDataset()  # Update with your dataset class name
+    # Create dataset with default parameters
+    dataset = ShallowWaterDataset(
+        Nphi=256,
+        Ntheta=128,
+        stop_sim_time=600,
+        save_interval=1,
+    )
 
     # Generate a single sample
+    print("Generating shallow water sample...")
     sample = next(iter(dataset))
 
     print("Sample keys:", list(sample.keys()))
     for key, value in sample.items():
-        if hasattr(value, 'shape'):
+        if isinstance(value, np.ndarray):
             print(f"{key}: shape {value.shape}")
         else:
-            print(f"{key}: {type(value)} - {value}")
+            print(f"{key}: {type(value)}")
 
-    # Plot the sample
-    plot_pde_sample(sample)  # Updated function name
+    # Create 4-panel plot
+    plot_shallow_water_sample(sample)

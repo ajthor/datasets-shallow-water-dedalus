@@ -1,40 +1,29 @@
 #!/usr/bin/env python3
 """
-Generate PDE dataset and save to parquet files in chunks.
-
-INSTRUCTIONS FOR CLAUDE:
-1. Update the docstring to describe your specific dataset
-2. Update the import statement to match your dataset class name
-3. Update the dataset instantiation call below
-4. The rest of the file should work as-is for any dataset following the template
+Generate shallow water PDE dataset and save to parquet files in chunks.
 """
 
 import os
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-# TODO: Update this import to match your dataset class name
-from dataset import YourDataset  # Replace YourDataset with your actual class name
+from dataset import ShallowWaterDataset
 
 
 def generate_dataset_split(
     split_name="train", num_samples=1000, chunk_size=100, output_dir="data"
 ):
-    """
-    Generate a dataset split and save as chunked parquet files.
-    
-    INSTRUCTIONS FOR CLAUDE:
-    - This function should work as-is for any dataset following the template
-    - Only modify the dataset instantiation below if you need custom parameters
-    """
+    """Generate a dataset split and save as chunked parquet files."""
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # TODO: Update this instantiation to match your dataset class and parameters
-    dataset = YourDataset()  # Add your dataset parameters here if needed
-    # Examples:
-    # dataset = HeatEquationDataset(Lx=5, Nx=512, diffusion_coeff=0.01)
-    # dataset = WaveDataset(wave_speed=2.0, boundary_conditions="reflective")
+    # Create shallow water dataset
+    dataset = ShallowWaterDataset(
+        Nphi=128,  # Smaller grid for faster generation
+        Ntheta=64,
+        stop_sim_time=100,  # Shorter simulations for dataset generation
+        save_interval=10,  # Save every 10 hours
+    )
     
     num_chunks = (num_samples + chunk_size - 1) // chunk_size  # Ceiling division
 
@@ -61,7 +50,10 @@ def generate_dataset_split(
             # Convert numpy arrays to lists for PyArrow compatibility
             table_data = {}
             for key, values in chunk_data.items():
-                table_data[key] = [arr.tolist() for arr in values]
+                if isinstance(values[0], np.ndarray):
+                    table_data[key] = [arr.tolist() if hasattr(arr, 'tolist') else arr for arr in values]
+                else:
+                    table_data[key] = values
 
             # Convert to PyArrow table
             table = pa.table(table_data)
