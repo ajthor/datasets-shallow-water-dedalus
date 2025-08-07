@@ -5,7 +5,7 @@ Plot a single sample from the shallow water dataset.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from dataset import ShallowWaterDataset, build_s2_coord_vertices
+from shallow_water_dataset import ShallowWaterDataset, build_s2_coord_vertices
 
 
 def plot_shallow_water_sample(sample, save_path="sample_plot.png"):

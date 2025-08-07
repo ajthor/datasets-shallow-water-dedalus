@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-from dataset import ShallowWaterDataset
+from shallow_water_dataset import ShallowWaterDataset
 
 
 def generate_dataset_split(
@@ -24,7 +24,7 @@ def generate_dataset_split(
         stop_sim_time=100,  # Shorter simulations for dataset generation
         save_interval=10,  # Save every 10 hours
     )
-    
+
     num_chunks = (num_samples + chunk_size - 1) // chunk_size  # Ceiling division
 
     print(f"Generating {num_samples} {split_name} samples in {num_chunks} chunks...")
@@ -51,7 +51,10 @@ def generate_dataset_split(
             table_data = {}
             for key, values in chunk_data.items():
                 if isinstance(values[0], np.ndarray):
-                    table_data[key] = [arr.tolist() if hasattr(arr, 'tolist') else arr for arr in values]
+                    table_data[key] = [
+                        arr.tolist() if hasattr(arr, "tolist") else arr
+                        for arr in values
+                    ]
                 else:
                     table_data[key] = values
 

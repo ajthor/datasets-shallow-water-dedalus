@@ -255,9 +255,4 @@ class ShallowWaterDataset(IterableDataset):
                 # Grid parameters
                 "Nphi": Nphi,
                 "Ntheta": Ntheta,
-                # Legacy fields for compatibility
-                "x": spatial_coords,  # Same as spatial_coordinates
-                "u": h_initial.ravel(),  # Flattened initial height perturbation
-                "y": spatial_coords,  # Same as spatial_coordinates
-                "s": vorticity_trajectory,  # Same as vorticity_trajectory
             }

@@ -8,10 +8,12 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import os
 from PIL import Image
-from dataset import ShallowWaterDataset, build_s2_coord_vertices
+from shallow_water_dataset import ShallowWaterDataset, build_s2_coord_vertices
 
 
-def create_shallow_water_animation(sample, save_path="shallow_water_animation.gif", fps=2):
+def create_shallow_water_animation(
+    sample, save_path="shallow_water_animation.gif", fps=2
+):
     """Create an animated GIF showing vorticity evolution over time"""
     # Extract data
     vorticity_traj = sample["vorticity_trajectory"]
@@ -77,7 +79,7 @@ def create_shallow_water_animation(sample, save_path="shallow_water_animation.gi
         plt.subplots_adjust(right=0.85)
         cbar_ax = fig.add_axes([0.87, 0.15, 0.02, 0.7])
         fig.colorbar(mappable, cax=cbar_ax, label="Vorticity (1/s)")
-        
+
         # Save frame
         frame_path = os.path.join(temp_dir, f"frame_{i:03d}.png")
         plt.savefig(frame_path, dpi=100, bbox_inches="tight", facecolor="white")
@@ -120,10 +122,10 @@ if __name__ == "__main__":
 
     # Create dataset with default parameters
     dataset = ShallowWaterDataset(
-        Nphi=64,  # Smaller for faster animation generation
-        Ntheta=32,
-        stop_sim_time=100,  # Shorter simulation
-        save_interval=5,
+        Nphi=256,
+        Ntheta=128,
+        stop_sim_time=600,
+        save_interval=1,
     )
 
     # Generate a single sample
