@@ -209,14 +209,6 @@ class ShallowWaterDataset(IterableDataset):
                     h_list.append(np.copy(h["g"]))
                     time_list.append(solver.sim_time / self.hour)
 
-            # Create spatial coordinates
-            Nphi, Ntheta = self.Nphi, self.Ntheta
-            phi_1d = np.linspace(0, 2 * np.pi, Nphi, endpoint=False)
-            theta_1d = np.linspace(0, np.pi, Ntheta)
-
-            phi_vert, theta_vert = build_s2_coord_vertices(phi_1d, theta_1d)
-            spatial_coords = np.column_stack([phi_vert.ravel(), theta_vert.ravel()])
-
             # Convert lists to arrays
             u_trajectory = np.array(u_list)  # Shape: (time, 2, Nphi, Ntheta)
             h_trajectory = np.array(h_list)  # Shape: (time, Nphi, Ntheta)
@@ -224,6 +216,14 @@ class ShallowWaterDataset(IterableDataset):
                 vorticity_list
             )  # Shape: (time, Nphi, Ntheta)
             time_coords = np.array(time_list)
+
+            # Create spatial coordinates
+            Nphi, Ntheta = self.Nphi, self.Ntheta
+            phi_1d = np.linspace(0, 2 * np.pi, Nphi, endpoint=False)
+            theta_1d = np.linspace(0, np.pi, Ntheta)
+
+            phi_vert, theta_vert = build_s2_coord_vertices(phi_1d, theta_1d)
+            spatial_coords = np.column_stack([phi_vert.ravel(), theta_vert.ravel()])
 
             # Format and yield comprehensive output
             yield {
@@ -237,9 +237,7 @@ class ShallowWaterDataset(IterableDataset):
                 # Initial conditions
                 "u_initial": u_list[0],  # Initial velocity field (2, Nphi, Ntheta)
                 "h_initial": h_initial,  # Initial height perturbation (Nphi, Ntheta)
-                "vorticity_initial": vorticity_list[
-                    0
-                ],  # Initial vorticity (Nphi, Ntheta)
+                "vorticity_initial": vorticity_list[0],  # Initial vorticity (Nphi, Ntheta)
                 # Solution trajectories
                 "u_trajectory": u_trajectory,  # Velocity evolution (time, 2, Nphi, Ntheta)
                 "h_trajectory": h_trajectory,  # Height evolution (time, Nphi, Ntheta)

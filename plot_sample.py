@@ -94,8 +94,8 @@ if __name__ == "__main__":
 
     # Create dataset with default parameters
     dataset = ShallowWaterDataset(
-        Nphi=256,
-        Ntheta=128,
+        Nphi=128,
+        Ntheta=64,
         stop_sim_time=600,
         save_interval=1,
     )
