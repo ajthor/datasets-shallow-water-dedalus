@@ -22,7 +22,7 @@ def generate_dataset_split(
         Nphi=128,  # Smaller grid for faster generation
         Ntheta=64,
         stop_sim_time=600,  # Shorter simulations for dataset generation
-        save_interval=1,  # Save every 1 hours
+        save_interval=10,  # Save every 1 hours
     )
 
     num_chunks = (num_samples + chunk_size - 1) // chunk_size  # Ceiling division
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     np.random.seed(42)
 
     # Generate train split
-    generate_dataset_split("train", num_samples=1000, chunk_size=10)
+    generate_dataset_split("train", num_samples=1000, chunk_size=5)
 
     # Generate test split
-    generate_dataset_split("test", num_samples=200, chunk_size=10)
+    generate_dataset_split("test", num_samples=200, chunk_size=5)

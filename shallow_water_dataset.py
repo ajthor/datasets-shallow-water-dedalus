@@ -153,8 +153,10 @@ class ShallowWaterDataset(IterableDataset):
                 * np.exp(-(((self.lat2 - self.lat) / beta) ** 2))
             )
 
-            # Store initial perturbation for output
+            # Store initial conditions for output
             h_initial = np.copy(h["g"])
+            u_initial = np.copy(u["g"])
+            vorticity_initial = -d3.div(d3.skew(u)).evaluate()["g"]
 
             # Solve the shallow water equations
             nu = self.nu
@@ -235,9 +237,9 @@ class ShallowWaterDataset(IterableDataset):
                 # Time coordinates
                 "time_coordinates": time_coords,  # Time points where solution was saved
                 # Initial conditions
-                "u_initial": u_list[0],  # Initial velocity field (2, Nphi, Ntheta)
+                "u_initial": u_initial,  # Initial velocity field (2, Nphi, Ntheta)
                 "h_initial": h_initial,  # Initial height perturbation (Nphi, Ntheta)
-                "vorticity_initial": vorticity_list[0],  # Initial vorticity (Nphi, Ntheta)
+                "vorticity_initial": vorticity_initial,  # Initial vorticity (Nphi, Ntheta)
                 # Solution trajectories
                 "u_trajectory": u_trajectory,  # Velocity evolution (time, 2, Nphi, Ntheta)
                 "h_trajectory": h_trajectory,  # Height evolution (time, Nphi, Ntheta)
